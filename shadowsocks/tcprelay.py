@@ -32,6 +32,8 @@ import threading
 from shadowsocks import encrypt, obfs, eventloop, shell, common, lru_cache, version
 from shadowsocks.common import pre_parse_header, parse_header
 
+logging.basicConfig(level=logging.INFO)
+
 # we clear at most TIMEOUTS_CLEAN_SIZE timeouts each time
 TIMEOUTS_CLEAN_SIZE = 512
 
@@ -378,6 +380,11 @@ class TCPRelayHandler(object):
                         self._server.add_transfer_u(self._user, len(data))
                 self._update_activity(len(data))
                 if data:
+                    if sock == self._local_sock:
+                        dirc = "local"
+                    else:
+                        dirc = "remote"
+                    logging.info("hash %s, write to %s: %s" % (hash(self), dirc, data))
                     l = len(data)
                     s = sock.send(data)
                     if s < l:
@@ -660,12 +667,14 @@ class TCPRelayHandler(object):
                     data_to_send = self._obfs.client_encode(data_to_send)
                 if data_to_send:
                     self._data_to_write_to_remote.append(data_to_send)
+                    logging.info("hash %s, append to _data_to_write_to_remote: [%s]" % (hash(self), data_to_send))
                 # notice here may go into _handle_dns_resolved directly
                 self._dns_resolver.resolve(self._chosen_server[0],
                                            self._handle_dns_resolved)
             else:
                 if len(data) > header_length:
                     self._data_to_write_to_remote.append(data[header_length:])
+                    logging.info("hash %s, after append to remote: [%s]" % (hash(self), self._data_to_write_to_remote))
                 # notice here may go into _handle_dns_resolved directly
                 self._dns_resolver.resolve(remote_addr,
                                            self._handle_dns_resolved)
@@ -842,6 +851,7 @@ class TCPRelayHandler(object):
         data = None
         try:
             data = self._local_sock.recv(recv_buffer_size)
+            logging.info("hash %s, reading from local, original data: [%s]" % (hash(self), data))
         except (OSError, IOError) as e:
             if eventloop.errno_from_exception(e) in \
                     (errno.ETIMEDOUT, errno.EAGAIN, errno.EWOULDBLOCK):
@@ -951,6 +961,7 @@ class TCPRelayHandler(object):
                 else:
                     recv_buffer_size = self._get_read_size(self._remote_sock, self._recv_buffer_size, False)
                 data = self._remote_sock.recv(recv_buffer_size)
+                logging.info("hash %s, reading from remote, original data: [%s]" % (hash(self), data))
                 self._recv_pack_id += 1
         except (OSError, IOError) as e:
             if eventloop.errno_from_exception(e) in \
@@ -1107,6 +1118,8 @@ class TCPRelayHandler(object):
         # 3. destroy won't raise any exceptions
         # if any of the promises are broken, it indicates a bug has been
         # introduced! mostly likely memory leaks, etc
+
+        logging.info("hash %s, destroyed" % hash(self))
         if self._stage == STAGE_DESTROYED:
             # this couldn't happen
             logging.debug('already destroyed')
@@ -1444,7 +1457,7 @@ class TCPRelay(object):
                         shell.print_exception(e)
                     sock.close()
             else:
-                logging.warn('poll removed fd')
+                logging.warning('poll removed fd')
                 handle = True
                 if fd in self._fd_to_handlers:
                     try:
